@@ -141,6 +141,8 @@ class AnthemSetupFlow(BaseSetupFlow[AnthemDeviceConfig]):
             # Get discovered capabilities
             input_count = discovery_device._input_count
             input_names_dict = discovery_device._input_names.copy()
+            discovered_model = discovery_device._model or "Unknown"
+            _LOG.info("SETUP: Model detected: %s", discovered_model)
             
             # Convert input names dict to list
             if input_names_dict and input_count > 0:
@@ -174,11 +176,11 @@ class AnthemSetupFlow(BaseSetupFlow[AnthemDeviceConfig]):
                 identifier=identifier,
                 name=name,
                 host=host,
-                model="AVM",  # All models supported (MRX, AVM, STR)
+                model="AVM",
                 port=port,
                 zones=zones,
                 discovered_inputs=discovered_inputs,
-                discovered_model="Anthem"  # Generic - all models work the same
+                discovered_model=discovered_model,
             )
             
             _LOG.info("SETUP: ✅ Returning config with %d discovered inputs", len(discovered_inputs))

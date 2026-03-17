@@ -31,7 +31,16 @@ class AnthemDeviceConfig:
     port: int = 14999
     zones: list[ZoneConfig] = field(default_factory=lambda: [ZoneConfig(1)])
 
-    # CRITICAL: Store discovered inputs from setup flow
-    # This is populated during query_device() BEFORE entities are created
     discovered_inputs: list[str] = field(default_factory=list)
     discovered_model: str = "Unknown"
+
+    @property
+    def is_x20_series(self) -> bool:
+        model_upper = self.discovered_model.upper()
+        if "AVM 60" in model_upper or "AVM60" in model_upper:
+            return True
+        if "MRX" in model_upper:
+            for suffix in ["520", "720", "1120"]:
+                if suffix in model_upper:
+                    return True
+        return False

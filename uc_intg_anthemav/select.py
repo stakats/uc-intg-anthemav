@@ -72,7 +72,10 @@ class AnthemListeningModeSelect(Select):
             entity_id = f"select.{device_config.identifier}.zone{zone_config.zone_number}_listening_mode"
             entity_name = f"{device_config.name} Zone {zone_config.zone_number} Listening Mode"
 
-        options_list = list(LISTENING_MODES.keys())
+        if device_config.is_x20_series:
+            options_list = list(LISTENING_MODES_X20.keys())
+        else:
+            options_list = list(LISTENING_MODES.keys())
 
         attributes = {
             Attributes.STATE: States.UNAVAILABLE,

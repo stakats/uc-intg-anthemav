@@ -215,7 +215,7 @@ class AnthemDriver(BaseIntegrationDriver[AnthemDevice, AnthemDeviceConfig]):
             self.api.configured_entities.update_attributes(
                 entity_id,
                 {
-                    select.Attributes.STATE: select.States.ON if zone_state.power else select.States.OFF,
+                    select.Attributes.STATE: select.States.ON,
                     select.Attributes.CURRENT_OPTION: zone_state.listening_mode,
                 },
             )

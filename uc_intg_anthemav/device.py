@@ -491,16 +491,8 @@ class AnthemDevice(PersistentConnectionDevice):
         return f"{const.CMD_ZONE_PREFIX}{zone}{command}{value}"
 
     def _requires_volume_suffix(self) -> bool:
-        """
-        Determine if this model requires '01' suffix for volume up/down commands.
-        x40 series (MRX 540/740/1140, AVM 70/90) require Z1VUP01/Z1VDN01 format.
-        x20 series (MRX 520/720/1120, AVM 60) use plain Z1VUP/Z1VDN.
-        """
-        if not self._model:
-            return False
-        if self.is_x20_series:
-            return False
-        return "MRX" in self._model.upper()
+        """All models use plain Z1VUP/Z1VDN without step suffix."""
+        return False
 
     @property
     def is_x20_series(self) -> bool:

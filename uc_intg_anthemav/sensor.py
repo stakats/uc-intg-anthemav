@@ -6,428 +6,65 @@ Anthem Sensor Entity implementation.
 """
 
 import logging
-from typing import Any
 
-from ucapi.sensor import Attributes, DeviceClasses, Sensor, States
+from ucapi.sensor import Attributes, DeviceClasses, Options, States
+from ucapi_framework import SensorEntity
 
-from .config import AnthemDeviceConfig, ZoneConfig
+from .config import AnthemDeviceConfig
 from .device import AnthemDevice
 
 _LOG = logging.getLogger(__name__)
 
 
-class AnthemVolumeSensor(Sensor):
-    """Sensor for displaying volume in dB (since media player only shows percentage)."""
+class AnthemSensor(SensorEntity):
+    """Generic sensor entity for Anthem device values."""
 
-    def __init__(
-        self,
-        device_config: AnthemDeviceConfig,
-        device: AnthemDevice,
-        zone_config: ZoneConfig,
-    ):
-        self._device = device
-        self._device_config = device_config
-        self._zone_config = zone_config
-
-        if zone_config.zone_number == 1:
-            entity_id = f"sensor.{device_config.identifier}_volume"
-            entity_name = f"{device_config.name} Volume"
-        else:
-            entity_id = f"sensor.{device_config.identifier}.zone{zone_config.zone_number}_volume"
-            entity_name = f"{device_config.name} Zone {zone_config.zone_number} Volume"
-
-        attributes = {
+    def __init__(self, entity_id, name, device, sensor_key, unit=None):
+        attrs = {
             Attributes.STATE: States.UNAVAILABLE,
-            Attributes.VALUE: "Unknown",
-            Attributes.UNIT: "dB",
+            Attributes.VALUE: "",
         }
-
-        options = {"CUSTOM_UNIT": "dB"}
+        options = {}
+        if unit:
+            options = {Options.CUSTOM_UNIT: unit}
 
         super().__init__(
             entity_id,
-            entity_name,
+            name,
             [],
-            attributes,
+            attrs,
             device_class=DeviceClasses.CUSTOM,
             options=options,
         )
-
-        _LOG.info("[%s] Volume sensor initialized for Zone %d", entity_id, zone_config.zone_number)
-
-        device.events.on("UPDATE", self._on_device_update)
-
-    async def _on_device_update(self, entity_id: str, update_data: dict[str, Any]) -> None:
-        """Handle device updates for volume sensor."""
-        expected_media_player_id = (
-            f"media_player.{self._device_config.identifier}"
-            if self._zone_config.zone_number == 1
-            else f"media_player.{self._device_config.identifier}.zone{self._zone_config.zone_number}"
-        )
-
-        if entity_id == expected_media_player_id:
-            zone_state = self._device.get_zone_state(self._zone_config.zone_number)
-            volume_db = zone_state.volume_db if zone_state.volume_db is not None else -90
-            self.attributes[Attributes.STATE] = States.ON
-            self.attributes[Attributes.VALUE] = str(volume_db)
-            _LOG.debug("[%s] Volume updated to %d dB", self.id, volume_db)
-
-    def update_from_device(self) -> None:
-        """Update sensor value from device state."""
-        zone_state = self._device.get_zone_state(self._zone_config.zone_number)
-        volume_db = zone_state.volume_db
-        self.attributes[Attributes.STATE] = States.ON
-        self.attributes[Attributes.VALUE] = str(volume_db)
-        _LOG.debug("[%s] Volume updated to %d dB", self.id, volume_db)
-
-    @property
-    def zone_number(self) -> int:
-        """Get zone number."""
-        return self._zone_config.zone_number
-
-
-class AnthemAudioFormatSensor(Sensor):
-    """Sensor for displaying current audio input format."""
-
-    def __init__(
-        self,
-        device_config: AnthemDeviceConfig,
-        device: AnthemDevice,
-        zone_config: ZoneConfig,
-    ):
         self._device = device
-        self._device_config = device_config
-        self._zone_config = zone_config
+        self._sensor_key = sensor_key
+        self.subscribe_to_device(device)
 
-        if zone_config.zone_number == 1:
-            entity_id = f"sensor.{device_config.identifier}_audio_format"
-            entity_name = f"{device_config.name} Audio Format"
-        else:
-            entity_id = f"sensor.{device_config.identifier}.zone{zone_config.zone_number}_audio_format"
-            entity_name = f"{device_config.name} Zone {zone_config.zone_number} Audio Format"
-
-        attributes = {
-            Attributes.STATE: States.UNAVAILABLE,
-            Attributes.VALUE: "Unknown",
-        }
-
-        super().__init__(
-            entity_id,
-            entity_name,
-            [],
-            attributes,
-            device_class=DeviceClasses.CUSTOM,
-        )
-
-        _LOG.info("[%s] Audio format sensor initialized for Zone %d", entity_id, zone_config.zone_number)
-
-        device.events.on("UPDATE", self._on_device_update)
-
-    async def _on_device_update(self, entity_id: str, update_data: dict[str, Any]) -> None:
-        """Handle device updates for audio format sensor."""
-        if entity_id == self.id:
-            zone_state = self._device.get_zone_state(self._zone_config.zone_number)
-            audio_format = zone_state.audio_format
-            self.attributes[Attributes.STATE] = States.ON
-            self.attributes[Attributes.VALUE] = audio_format
-            _LOG.debug("[%s] Audio format updated to %s", self.id, audio_format)
-
-    def update_from_device(self) -> None:
-        """Update sensor value from device state."""
-        zone_state = self._device.get_zone_state(self._zone_config.zone_number)
-        audio_format = zone_state.audio_format
-        self.attributes[Attributes.STATE] = States.ON
-        self.attributes[Attributes.VALUE] = audio_format
-        _LOG.debug("[%s] Audio format updated to %s", self.id, audio_format)
-
-    @property
-    def zone_number(self) -> int:
-        """Get zone number."""
-        return self._zone_config.zone_number
+    async def sync_state(self):
+        if not self._device.is_connected:
+            self.update({Attributes.STATE: States.UNAVAILABLE})
+            return
+        value = self._device.get_sensor_value(self._sensor_key)
+        self.update({
+            Attributes.STATE: States.ON,
+            Attributes.VALUE: value or "Unknown",
+        })
 
 
-class AnthemAudioChannelsSensor(Sensor):
-    """Sensor for displaying current audio channel configuration."""
-
-    def __init__(
-        self,
-        device_config: AnthemDeviceConfig,
-        device: AnthemDevice,
-        zone_config: ZoneConfig,
-    ):
-        self._device = device
-        self._device_config = device_config
-        self._zone_config = zone_config
-
-        if zone_config.zone_number == 1:
-            entity_id = f"sensor.{device_config.identifier}_audio_channels"
-            entity_name = f"{device_config.name} Audio Channels"
-        else:
-            entity_id = f"sensor.{device_config.identifier}.zone{zone_config.zone_number}_audio_channels"
-            entity_name = f"{device_config.name} Zone {zone_config.zone_number} Audio Channels"
-
-        attributes = {
-            Attributes.STATE: States.UNAVAILABLE,
-            Attributes.VALUE: "Unknown",
-        }
-
-        super().__init__(
-            entity_id,
-            entity_name,
-            [],
-            attributes,
-            device_class=DeviceClasses.CUSTOM,
-        )
-
-        _LOG.info("[%s] Audio channels sensor initialized for Zone %d", entity_id, zone_config.zone_number)
-
-        device.events.on("UPDATE", self._on_device_update)
-
-    async def _on_device_update(self, entity_id: str, update_data: dict[str, Any]) -> None:
-        """Handle device updates for audio channels sensor."""
-        if entity_id == self.id:
-            zone_state = self._device.get_zone_state(self._zone_config.zone_number)
-            audio_channels = zone_state.audio_channels
-            self.attributes[Attributes.STATE] = States.ON
-            self.attributes[Attributes.VALUE] = audio_channels
-            _LOG.debug("[%s] Audio channels updated to %s", self.id, audio_channels)
-
-    def update_from_device(self) -> None:
-        """Update sensor value from device state."""
-        zone_state = self._device.get_zone_state(self._zone_config.zone_number)
-        audio_channels = zone_state.audio_channels
-        self.attributes[Attributes.STATE] = States.ON
-        self.attributes[Attributes.VALUE] = audio_channels
-        _LOG.debug("[%s] Audio channels updated to %s", self.id, audio_channels)
-
-    @property
-    def zone_number(self) -> int:
-        """Get zone number."""
-        return self._zone_config.zone_number
-
-
-class AnthemVideoResolutionSensor(Sensor):
-    """Sensor for displaying current video resolution."""
-
-    def __init__(
-        self,
-        device_config: AnthemDeviceConfig,
-        device: AnthemDevice,
-        zone_config: ZoneConfig,
-    ):
-        self._device = device
-        self._device_config = device_config
-        self._zone_config = zone_config
-
-        if zone_config.zone_number == 1:
-            entity_id = f"sensor.{device_config.identifier}_video_resolution"
-            entity_name = f"{device_config.name} Video Resolution"
-        else:
-            entity_id = f"sensor.{device_config.identifier}.zone{zone_config.zone_number}_video_resolution"
-            entity_name = f"{device_config.name} Zone {zone_config.zone_number} Video Resolution"
-
-        attributes = {
-            Attributes.STATE: States.UNAVAILABLE,
-            Attributes.VALUE: "Unknown",
-        }
-
-        super().__init__(
-            entity_id,
-            entity_name,
-            [],
-            attributes,
-            device_class=DeviceClasses.CUSTOM,
-        )
-
-        _LOG.info("[%s] Video resolution sensor initialized for Zone %d", entity_id, zone_config.zone_number)
-
-        device.events.on("UPDATE", self._on_device_update)
-
-    async def _on_device_update(self, entity_id: str, update_data: dict[str, Any]) -> None:
-        """Handle device updates for video resolution sensor."""
-        if entity_id == self.id:
-            zone_state = self._device.get_zone_state(self._zone_config.zone_number)
-            video_resolution = zone_state.video_resolution
-            self.attributes[Attributes.STATE] = States.ON
-            self.attributes[Attributes.VALUE] = video_resolution
-            _LOG.debug("[%s] Video resolution updated to %s", self.id, video_resolution)
-
-    def update_from_device(self) -> None:
-        """Update sensor value from device state."""
-        zone_state = self._device.get_zone_state(self._zone_config.zone_number)
-        video_resolution = zone_state.video_resolution
-        self.attributes[Attributes.STATE] = States.ON
-        self.attributes[Attributes.VALUE] = video_resolution
-        _LOG.debug("[%s] Video resolution updated to %s", self.id, video_resolution)
-
-    @property
-    def zone_number(self) -> int:
-        """Get zone number."""
-        return self._zone_config.zone_number
-
-
-class AnthemListeningModeSensor(Sensor):
-    """Sensor for displaying current listening/audio processing mode."""
-
-    def __init__(
-        self,
-        device_config: AnthemDeviceConfig,
-        device: AnthemDevice,
-        zone_config: ZoneConfig,
-    ):
-        self._device = device
-        self._device_config = device_config
-        self._zone_config = zone_config
-
-        if zone_config.zone_number == 1:
-            entity_id = f"sensor.{device_config.identifier}_listening_mode"
-            entity_name = f"{device_config.name} Listening Mode"
-        else:
-            entity_id = f"sensor.{device_config.identifier}.zone{zone_config.zone_number}_listening_mode"
-            entity_name = f"{device_config.name} Zone {zone_config.zone_number} Listening Mode"
-
-        attributes = {
-            Attributes.STATE: States.UNAVAILABLE,
-            Attributes.VALUE: "Unknown",
-        }
-
-        super().__init__(
-            entity_id,
-            entity_name,
-            [],
-            attributes,
-            device_class=DeviceClasses.CUSTOM,
-        )
-
-        _LOG.info("[%s] Listening mode sensor initialized for Zone %d", entity_id, zone_config.zone_number)
-
-        device.events.on("UPDATE", self._on_device_update)
-
-    async def _on_device_update(self, entity_id: str, update_data: dict[str, Any]) -> None:
-        """Handle device updates for listening mode sensor."""
-        if entity_id == self.id:
-            zone_state = self._device.get_zone_state(self._zone_config.zone_number)
-            listening_mode = zone_state.listening_mode
-            self.attributes[Attributes.STATE] = States.ON
-            self.attributes[Attributes.VALUE] = listening_mode
-            _LOG.debug("[%s] Listening mode updated to %s", self.id, listening_mode)
-
-    def update_from_device(self) -> None:
-        """Update sensor value from device state."""
-        zone_state = self._device.get_zone_state(self._zone_config.zone_number)
-        listening_mode = zone_state.listening_mode
-        self.attributes[Attributes.STATE] = States.ON
-        self.attributes[Attributes.VALUE] = listening_mode
-        _LOG.debug("[%s] Listening mode updated to %s", self.id, listening_mode)
-
-    @property
-    def zone_number(self) -> int:
-        """Get zone number."""
-        return self._zone_config.zone_number
-
-
-class AnthemSampleRateSensor(Sensor):
-    """Sensor for displaying current audio sample rate and bit depth."""
-
-    def __init__(
-        self,
-        device_config: AnthemDeviceConfig,
-        device: AnthemDevice,
-        zone_config: ZoneConfig,
-    ):
-        self._device = device
-        self._device_config = device_config
-        self._zone_config = zone_config
-
-        if zone_config.zone_number == 1:
-            entity_id = f"sensor.{device_config.identifier}_sample_rate"
-            entity_name = f"{device_config.name} Sample Rate"
-        else:
-            entity_id = f"sensor.{device_config.identifier}.zone{zone_config.zone_number}_sample_rate"
-            entity_name = f"{device_config.name} Zone {zone_config.zone_number} Sample Rate"
-
-        attributes = {
-            Attributes.STATE: States.UNAVAILABLE,
-            Attributes.VALUE: "Unknown",
-        }
-
-        super().__init__(
-            entity_id,
-            entity_name,
-            [],
-            attributes,
-            device_class=DeviceClasses.CUSTOM,
-        )
-
-        _LOG.info("[%s] Sample rate sensor initialized for Zone %d", entity_id, zone_config.zone_number)
-
-        device.events.on("UPDATE", self._on_device_update)
-
-    async def _on_device_update(self, entity_id: str, update_data: dict[str, Any]) -> None:
-        """Handle device updates for sample rate sensor."""
-        if entity_id == self.id:
-            zone_state = self._device.get_zone_state(self._zone_config.zone_number)
-            sample_rate = zone_state.sample_rate
-            self.attributes[Attributes.STATE] = States.ON
-            self.attributes[Attributes.VALUE] = sample_rate
-            _LOG.debug("[%s] Sample rate updated to %s", self.id, sample_rate)
-
-    def update_from_device(self) -> None:
-        """Update sensor value from device state."""
-        zone_state = self._device.get_zone_state(self._zone_config.zone_number)
-        sample_rate = zone_state.sample_rate
-        self.attributes[Attributes.STATE] = States.ON
-        self.attributes[Attributes.VALUE] = sample_rate
-        _LOG.debug("[%s] Sample rate updated to %s", self.id, sample_rate)
-
-    @property
-    def zone_number(self) -> int:
-        """Get zone number."""
-        return self._zone_config.zone_number
-
-
-class AnthemModelSensor(Sensor):
-    """Sensor for displaying receiver model information."""
-
-    def __init__(
-        self,
-        device_config: AnthemDeviceConfig,
-        device: AnthemDevice,
-    ):
-        self._device = device
-        self._device_config = device_config
-
-        entity_id = f"sensor.{device_config.identifier}_model"
-        entity_name = f"{device_config.name} Model"
-
-        attributes = {
-            Attributes.STATE: States.UNAVAILABLE,
-            Attributes.VALUE: device_config.model or "Unknown",
-        }
-
-        super().__init__(
-            entity_id,
-            entity_name,
-            [],
-            attributes,
-            device_class=DeviceClasses.CUSTOM,
-        )
-
-        _LOG.info("[%s] Model sensor initialized", entity_id)
-
-        device.events.on("UPDATE", self._on_device_update)
-
-    async def _on_device_update(self, entity_id: str, update_data: dict[str, Any]) -> None:
-        """Handle device updates for model sensor."""
-        if "model" in update_data:
-            model = update_data["model"]
-            self.attributes[Attributes.STATE] = States.ON
-            self.attributes[Attributes.VALUE] = model
-            _LOG.debug("[%s] Model updated to %s", self.id, model)
-
-    def update_from_device(self) -> None:
-        """Update sensor value from device state."""
-        if self._device._model:
-            self.attributes[Attributes.STATE] = States.ON
-            self.attributes[Attributes.VALUE] = self._device._model
-            _LOG.debug("[%s] Model updated to %s", self.id, self._device._model)
+def create_sensors(config: AnthemDeviceConfig, device: AnthemDevice) -> list:
+    """Create all sensor entities for Zone 1."""
+    device_id = config.identifier
+    sensor_defs = [
+        ("volume", f"{config.name} Volume", "dB"),
+        ("audio_format", f"{config.name} Audio Format", None),
+        ("audio_channels", f"{config.name} Audio Channels", None),
+        ("video_resolution", f"{config.name} Video Resolution", None),
+        ("listening_mode", f"{config.name} Listening Mode", None),
+        ("sample_rate", f"{config.name} Sample Rate", None),
+        ("model", f"{config.name} Model", None),
+    ]
+    sensors = []
+    for key, name, unit in sensor_defs:
+        entity_id = f"sensor.{device_id}.{key}"
+        sensors.append(AnthemSensor(entity_id, name, device, key, unit))
+    return sensors

@@ -11,9 +11,7 @@ from typing import Any
 from functools import singledispatchmethod
 from collections import defaultdict
 
-from ucapi_framework import PersistentConnectionDevice, DeviceEvents
-from ucapi.media_player import Attributes as MediaAttributes
-from ucapi.sensor import Attributes as SensorAttributes, States as SensorStates
+from ucapi_framework import PersistentConnectionDevice
 
 from .config import AnthemDeviceConfig
 from . import const
@@ -210,15 +208,7 @@ class AnthemDevice(PersistentConnectionDevice):
         self._model = message.model
         self._device_config.discovered_model = message.model
         _LOG.info("[%s] Model: %s", self.log_id, message.model)
-        model_sensor_id = f"sensor.{self.identifier}_model"
-        self.events.emit(
-            DeviceEvents.UPDATE,
-            model_sensor_id,
-            {
-                SensorAttributes.STATE.value: SensorStates.ON.value,
-                SensorAttributes.VALUE.value: message.model,
-            },
-        )
+        self.push_update()
 
     @_handle_message.register
     def _(self, message: InputCount) -> None:
@@ -235,21 +225,11 @@ class AnthemDevice(PersistentConnectionDevice):
 
         if len(self._input_names) == self._input_count:
             _LOG.info(
-                "[%s] All %d inputs discovered, updating source lists",
+                "[%s] All %d inputs discovered",
                 self.log_id,
                 self._input_count,
             )
-            source_list = self.get_input_list()
-
-            for zone_config in self._device_config.zones:
-                if zone_config.enabled:
-                    entity_id = self._get_entity_id_for_zone(zone_config.zone_number)
-                    if entity_id:
-                        self.events.emit(
-                            DeviceEvents.UPDATE,
-                            entity_id,
-                            {MediaAttributes.SOURCE_LIST.value: source_list},
-                        )
+            self.push_update()
 
     @_handle_message.register
     def _(self, message: ZonePower) -> None:
@@ -257,15 +237,7 @@ class AnthemDevice(PersistentConnectionDevice):
         if zone.power is not None and message.is_on == zone.power:
             return
         zone.power = message.is_on
-
-        new_state = "ON" if message.is_on else "OFF"
-        entity_id = self._get_entity_id_for_zone(message.zone)
-        if entity_id:
-            self.events.emit(
-                DeviceEvents.UPDATE,
-                entity_id,
-                {MediaAttributes.STATE.value: new_state},
-            )
+        self.push_update()
 
         if message.is_on:
             asyncio.create_task(self._query_zone_on_power_on(message.zone))
@@ -289,37 +261,13 @@ class AnthemDevice(PersistentConnectionDevice):
         if zone.volume_db is not None and message.volume_db == zone.volume_db:
             return
         zone.volume_db = message.volume_db
-        volume_pct = int(((message.volume_db + 90) / 90) * 100)
-        volume_pct = max(0, min(100, volume_pct))
-
-        entity_id = self._get_entity_id_for_zone(message.zone)
-        if entity_id:
-            _LOG.debug(
-                "[%s] Zone %d: Volume update %ddB → %d%%",
-                self.log_id,
-                message.zone,
-                message.volume_db,
-                volume_pct,
-            )
-            self.events.emit(
-                DeviceEvents.UPDATE,
-                entity_id,
-                {
-                    MediaAttributes.VOLUME.value: volume_pct,
-                    MediaAttributes.STATE.value: "ON" if zone.power else "OFF",
-                },
-            )
-
-        if self._is_sensor_zone(message.zone):
-            sensor_id = f"sensor.{self.identifier}_volume"
-            self.events.emit(
-                DeviceEvents.UPDATE,
-                sensor_id,
-                {
-                    SensorAttributes.STATE.value: SensorStates.ON.value,
-                    SensorAttributes.VALUE.value: str(message.volume_db),
-                },
-            )
+        _LOG.debug(
+            "[%s] Zone %d: Volume update %ddB",
+            self.log_id,
+            message.zone,
+            message.volume_db,
+        )
+        self.push_update()
 
     @_handle_message.register
     def _(self, message: ZoneMute) -> None:
@@ -327,17 +275,7 @@ class AnthemDevice(PersistentConnectionDevice):
         if zone.muted is not None and message.is_muted == zone.muted:
             return
         zone.muted = message.is_muted
-
-        entity_id = self._get_entity_id_for_zone(message.zone)
-        if entity_id:
-            self.events.emit(
-                DeviceEvents.UPDATE,
-                entity_id,
-                {
-                    MediaAttributes.MUTED.value: message.is_muted,
-                    MediaAttributes.STATE.value: "ON" if zone.power else "OFF",
-                },
-            )
+        self.push_update()
 
     @_handle_message.register
     def _(self, message: ZoneInput) -> None:
@@ -348,17 +286,7 @@ class AnthemDevice(PersistentConnectionDevice):
         zone.input_name = self._input_names.get(
             message.input_number, f"Input {message.input_number}"
         )
-
-        entity_id = self._get_entity_id_for_zone(message.zone)
-        if entity_id:
-            self.events.emit(
-                DeviceEvents.UPDATE,
-                entity_id,
-                {
-                    MediaAttributes.SOURCE.value: zone.input_name,
-                    MediaAttributes.STATE.value: "ON" if zone.power else "OFF",
-                },
-            )
+        self.push_update()
 
     @_handle_message.register
     def _(self, message: ZoneAudioFormat) -> None:
@@ -367,16 +295,7 @@ class AnthemDevice(PersistentConnectionDevice):
         if decoded == zone.audio_format:
             return
         zone.audio_format = decoded
-        if self._is_sensor_zone(message.zone):
-            sensor_id = f"sensor.{self.identifier}_audio_format"
-            self.events.emit(
-                DeviceEvents.UPDATE,
-                sensor_id,
-                {
-                    SensorAttributes.STATE.value: SensorStates.ON.value,
-                    SensorAttributes.VALUE.value: decoded,
-                },
-            )
+        self.push_update()
 
     @_handle_message.register
     def _(self, message: ZoneAudioChannels) -> None:
@@ -385,16 +304,7 @@ class AnthemDevice(PersistentConnectionDevice):
         if decoded == zone.audio_channels:
             return
         zone.audio_channels = decoded
-        if self._is_sensor_zone(message.zone):
-            sensor_id = f"sensor.{self.identifier}_audio_channels"
-            self.events.emit(
-                DeviceEvents.UPDATE,
-                sensor_id,
-                {
-                    SensorAttributes.STATE.value: SensorStates.ON.value,
-                    SensorAttributes.VALUE.value: decoded,
-                },
-            )
+        self.push_update()
 
     @_handle_message.register
     def _(self, message: ZoneVideoResolution) -> None:
@@ -403,16 +313,7 @@ class AnthemDevice(PersistentConnectionDevice):
         if decoded == zone.video_resolution:
             return
         zone.video_resolution = decoded
-        if self._is_sensor_zone(message.zone):
-            sensor_id = f"sensor.{self.identifier}_video_resolution"
-            self.events.emit(
-                DeviceEvents.UPDATE,
-                sensor_id,
-                {
-                    SensorAttributes.STATE.value: SensorStates.ON.value,
-                    SensorAttributes.VALUE.value: decoded,
-                },
-            )
+        self.push_update()
 
     @_handle_message.register
     def _(self, message: ZoneListeningMode) -> None:
@@ -426,16 +327,7 @@ class AnthemDevice(PersistentConnectionDevice):
         if mode_name == zone.listening_mode:
             return
         zone.listening_mode = mode_name
-        if self._is_sensor_zone(message.zone):
-            sensor_id = f"sensor.{self.identifier}_listening_mode"
-            self.events.emit(
-                DeviceEvents.UPDATE,
-                sensor_id,
-                {
-                    SensorAttributes.STATE.value: SensorStates.ON.value,
-                    SensorAttributes.VALUE.value: mode_name,
-                },
-            )
+        self.push_update()
 
     @_handle_message.register
     def _(self, message: ZoneSampleRateInfo) -> None:
@@ -443,7 +335,7 @@ class AnthemDevice(PersistentConnectionDevice):
         if message.info == zone.sample_rate:
             return
         zone.sample_rate = message.info
-        self._emit_sample_rate_update(message.zone, message.info)
+        self.push_update()
 
     @_handle_message.register
     def _(self, message: ZoneSampleRate) -> None:
@@ -452,7 +344,7 @@ class AnthemDevice(PersistentConnectionDevice):
         if new_rate == zone.sample_rate:
             return
         zone.sample_rate = new_rate
-        self._emit_sample_rate_update(message.zone, zone.sample_rate)
+        self.push_update()
 
     @_handle_message.register
     def _(self, message: ZoneBitDepth) -> None:
@@ -462,49 +354,13 @@ class AnthemDevice(PersistentConnectionDevice):
         if new_rate == zone.sample_rate:
             return
         zone.sample_rate = new_rate
-        self._emit_sample_rate_update(message.zone, zone.sample_rate)
-
-    def _emit_sample_rate_update(self, zone_num: int, value: str) -> None:
-        if self._is_sensor_zone(zone_num):
-            sensor_id = f"sensor.{self.identifier}_sample_rate"
-            self.events.emit(
-                DeviceEvents.UPDATE,
-                sensor_id,
-                {
-                    SensorAttributes.STATE.value: SensorStates.ON.value,
-                    SensorAttributes.VALUE.value: value,
-                },
-            )
-
-    def _is_sensor_zone(self, zone_num: int) -> bool:
-        """Check if the given zone should emit sensor updates (Zone 1 only)."""
-        return zone_num == 1
-
-    def _get_entity_id_for_zone(self, zone_num: int) -> str | None:
-        """Get entity ID for a zone number."""
-        if zone_num == 1:
-            return f"media_player.{self.identifier}"
-        return f"media_player.{self.identifier}.zone{zone_num}"
-
-    def _get_zone_command(self, zone: int, command: str, value: Any = "") -> str:
-        """Construct a zone-specific command string."""
-        return f"{const.CMD_ZONE_PREFIX}{zone}{command}{value}"
-
-    def _requires_volume_suffix(self) -> bool:
-        """All models use plain Z1VUP/Z1VDN without step suffix."""
-        return False
+        self.push_update()
 
     @property
     def is_x20_series(self) -> bool:
-        """Check if this is an x20 series model (MRX 520/720/1120, AVM 60)."""
         return self._uses_isn_format()
 
     def _uses_isn_format(self) -> bool:
-        """
-        Determine if this model uses ISN/ILN format for input name queries.
-        MRX x20 series (MRX 520, 720, 1120) and AVM 60 use ISNyy?/ILNyy? format.
-        Older models (MRX 540, 740, 1140, AVM 70/90) use ISiIN? format.
-        """
         if not self._model:
             return False
 
@@ -534,41 +390,50 @@ class AnthemDevice(PersistentConnectionDevice):
             await self._send_command(cmd)
             await asyncio.sleep(0.05)
 
+    def get_sensor_value(self, key: str) -> str | None:
+        """Get sensor value by key from Zone 1 state."""
+        if key == "model":
+            return self._model
+        zone = self._zone_states[1]
+        mapping = {
+            "volume": str(zone.volume_db) if zone.volume_db is not None else None,
+            "audio_format": zone.audio_format if zone.audio_format != "Unknown" else None,
+            "audio_channels": zone.audio_channels if zone.audio_channels != "Unknown" else None,
+            "video_resolution": zone.video_resolution if zone.video_resolution != "Unknown" else None,
+            "listening_mode": zone.listening_mode if zone.listening_mode != "Unknown" else None,
+            "sample_rate": zone.sample_rate if zone.sample_rate != "Unknown" else None,
+        }
+        return mapping.get(key)
+
     async def power_on(self, zone: int = 1) -> bool:
-        """Turn on the specified zone."""
         return await self._send_command(
             self._get_zone_command(zone, const.CMD_POWER, const.VAL_ON)
         )
 
     async def power_off(self, zone: int = 1) -> bool:
-        """Turn off the specified zone."""
         return await self._send_command(
             self._get_zone_command(zone, const.CMD_POWER, const.VAL_OFF)
         )
 
     async def set_volume(self, volume_db: int, zone: int = 1) -> bool:
-        """Set volume in dB (-90 to 0)."""
         volume_db = max(-90, min(0, volume_db))
         return await self._send_command(
             self._get_zone_command(zone, const.CMD_VOLUME, volume_db)
         )
 
     async def volume_up(self, zone: int = 1) -> bool:
-        """Increase volume by 1dB."""
         suffix = "01" if self._requires_volume_suffix() else ""
         return await self._send_command(
             self._get_zone_command(zone, const.CMD_VOLUME_UP, suffix)
         )
 
     async def volume_down(self, zone: int = 1) -> bool:
-        """Decrease volume by 1dB."""
         suffix = "01" if self._requires_volume_suffix() else ""
         return await self._send_command(
             self._get_zone_command(zone, const.CMD_VOLUME_DOWN, suffix)
         )
 
     async def set_mute(self, muted: bool, zone: int = 1) -> bool:
-        """Set mute state."""
         return await self._send_command(
             self._get_zone_command(
                 zone, const.CMD_MUTE, const.VAL_ON if muted else const.VAL_OFF
@@ -576,19 +441,16 @@ class AnthemDevice(PersistentConnectionDevice):
         )
 
     async def mute_toggle(self, zone: int = 1) -> bool:
-        """Toggle mute state using native Anthem command."""
         return await self._send_command(
             self._get_zone_command(zone, const.CMD_MUTE, const.VAL_TOGGLE)
         )
 
     async def select_input(self, input_num: int, zone: int = 1) -> bool:
-        """Select input source."""
         return await self._send_command(
             self._get_zone_command(zone, const.CMD_INPUT, input_num)
         )
 
     async def set_arc(self, enabled: bool, input_num: int = 1) -> bool:
-        """Enable/disable Anthem Room Correction. x20: global. x40: per-input."""
         val = const.VAL_ON if enabled else const.VAL_OFF
         if self.is_x20_series:
             return await self._send_command(f"{const.CMD_ARC_X20}{val}")
@@ -597,7 +459,6 @@ class AnthemDevice(PersistentConnectionDevice):
         )
 
     async def set_front_panel_brightness(self, brightness: int) -> bool:
-        """Set front panel brightness. x20: 0-3 (Off/Low/Med/High). x40: 0-100."""
         if self.is_x20_series:
             brightness = max(0, min(3, brightness))
             return await self._send_command(
@@ -607,7 +468,6 @@ class AnthemDevice(PersistentConnectionDevice):
         return await self._send_command(f"{const.CMD_FRONT_PANEL_BRIGHTNESS}{brightness}")
 
     async def set_front_panel_display(self, mode: int) -> bool:
-        """Set front panel display mode (0=All, 1=Volume only). x40 only."""
         if self.is_x20_series:
             _LOG.debug("[%s] Display mode not supported on x20 series", self.log_id)
             return False
@@ -615,34 +475,28 @@ class AnthemDevice(PersistentConnectionDevice):
         return await self._send_command(f"{const.CMD_FRONT_PANEL_DISPLAY_INFO}{mode}")
 
     async def set_hdmi_standby_bypass(self, mode: int) -> bool:
-        """Set HDMI standby bypass (0=Off, 1=Last Used, 2-8=HDMI 1-7)."""
         mode = max(0, min(8, mode))
         return await self._send_command(f"{const.CMD_HDMI_STANDBY_BYPASS}{mode}")
 
     async def set_cec_control(self, enabled: bool) -> bool:
-        """Enable/disable CEC control."""
         return await self._send_command(
             f"{const.CMD_CEC_CONTROL}{const.VAL_ON if enabled else const.VAL_OFF}"
         )
 
     async def set_zone2_max_volume(self, volume_db: int) -> bool:
-        """Set Zone 2 maximum volume (-40 to +10 dB)."""
         volume_db = max(-40, min(10, volume_db))
         return await self._send_command(f"{const.CMD_ZONE2_MAX_VOL}{volume_db}")
 
     async def set_zone2_power_on_volume(self, volume_db: int | None) -> bool:
-        """Set Zone 2 power-on volume (0=Last Used, or -90 to max volume)."""
         if volume_db is None or volume_db == 0:
             return await self._send_command(f"{const.CMD_ZONE2_POWER_ON_VOL}0")
         volume_db = max(-90, min(10, volume_db))
         return await self._send_command(f"{const.CMD_ZONE2_POWER_ON_VOL}{volume_db}")
 
     async def set_zone2_power_on_input(self, input_num: int) -> bool:
-        """Set Zone 2 power-on input (0=Last Used, or input number)."""
         return await self._send_command(f"{const.CMD_ZONE2_POWER_ON_INPUT}{input_num}")
 
     async def speaker_level_up(self, channel: int, zone: int = 1, step: int = 1) -> bool:
-        """Increase speaker level. x20: channel 0-7, step in dB. x40: hex channel."""
         if self.is_x20_series:
             return await self._send_command(
                 self._get_zone_command(
@@ -655,7 +509,6 @@ class AnthemDevice(PersistentConnectionDevice):
         )
 
     async def speaker_level_down(self, channel: int, zone: int = 1, step: int = 1) -> bool:
-        """Decrease speaker level. x20: channel 0-7, step in dB. x40: hex channel."""
         if self.is_x20_series:
             return await self._send_command(
                 self._get_zone_command(
@@ -668,7 +521,6 @@ class AnthemDevice(PersistentConnectionDevice):
         )
 
     async def set_osd_info(self, mode: int) -> bool:
-        """Set on-screen display info mode (0=Off, 1=16:9, 2=2.4:1). x40 only."""
         if self.is_x20_series:
             _LOG.debug("[%s] OSD info not supported on x20 series", self.log_id)
             return False
@@ -676,7 +528,6 @@ class AnthemDevice(PersistentConnectionDevice):
         return await self._send_command(f"{const.CMD_OSD_INFO}{mode}")
 
     async def query_status(self, zone: int = 1) -> bool:
-        """Query all status for a zone including sensor data."""
         queries = [
             const.CMD_POWER_QUERY,
             const.CMD_VOLUME_QUERY,
@@ -694,7 +545,6 @@ class AnthemDevice(PersistentConnectionDevice):
         return True
 
     async def query_audio_info(self, zone: int = 1) -> bool:
-        """Query audio format information."""
         queries = [
             const.CMD_AUDIO_FORMAT_QUERY,
             const.CMD_AUDIO_CHANNELS_QUERY,
@@ -709,7 +559,6 @@ class AnthemDevice(PersistentConnectionDevice):
         return True
 
     async def query_video_info(self, zone: int = 1) -> bool:
-        """Query video format information."""
         queries = [
             const.CMD_VIDEO_RESOLUTION_QUERY,
             const.CMD_VIDEO_HORIZ_RES_QUERY,
@@ -722,29 +571,17 @@ class AnthemDevice(PersistentConnectionDevice):
 
     def get_input_list(self) -> list[str]:
         if self._device_config.discovered_inputs:
-            _LOG.debug(
-                "[%s] Using discovered inputs from config (%d sources)",
-                self.log_id,
-                len(self._device_config.discovered_inputs),
-            )
             return self._device_config.discovered_inputs
 
         if self._input_names and self._input_count > 0:
-            _LOG.debug(
-                "[%s] Using runtime discovered inputs (%d sources)",
-                self.log_id,
-                self._input_count,
-            )
             return [
                 self._input_names.get(i, f"Input {i}")
                 for i in range(1, self._input_count + 1)
             ]
 
-        _LOG.debug("[%s] Using default input list (discovery incomplete)", self.log_id)
         return const.DEFAULT_INPUT_LIST
 
     def get_input_number_by_name(self, name: str) -> int | None:
-        """Get input number by name."""
         for num, inp_name in self._input_names.items():
             if inp_name == name:
                 return num
@@ -759,5 +596,10 @@ class AnthemDevice(PersistentConnectionDevice):
         return const.DEFAULT_INPUT_MAP.get(name)
 
     def get_zone_state(self, zone: int) -> ZoneState:
-        """Get current state for a zone."""
         return self._zone_states[zone]
+
+    def _get_zone_command(self, zone: int, command: str, value: Any = "") -> str:
+        return f"{const.CMD_ZONE_PREFIX}{zone}{command}{value}"
+
+    def _requires_volume_suffix(self) -> bool:
+        return False

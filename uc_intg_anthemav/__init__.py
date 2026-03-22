@@ -14,9 +14,9 @@ from pathlib import Path
 from ucapi import DeviceStates
 from ucapi_framework import get_config_path, BaseConfigManager
 
-from uc_intg_anthemav.driver import AnthemDriver
-from uc_intg_anthemav.setup_flow import AnthemSetupFlow
-from uc_intg_anthemav.config import AnthemDeviceConfig
+from .driver import AnthemDriver
+from .setup_flow import AnthemSetupFlow
+from .config import AnthemDeviceConfig
 
 try:
     _driver_path = Path(__file__).parent.parent / "driver.json"
@@ -30,18 +30,17 @@ _LOG = logging.getLogger(__name__)
 
 async def main():
     """Main entry point for the Anthem A/V integration."""
+    level = os.environ.get("UC_LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
-        level=logging.INFO,
+        level=getattr(logging, level, logging.INFO),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
-    # Suppress websocket handshake errors (normal noise from port probing)
     logging.getLogger("websockets.server").setLevel(logging.CRITICAL)
 
     _LOG.info("Starting Anthem A/V Integration v%s", __version__)
 
     try:
-        # Create driver
         driver = AnthemDriver()
         config_path = get_config_path(driver.api.config_dir_path or "")
         config_manager = BaseConfigManager(
@@ -52,17 +51,13 @@ async def main():
         )
         driver.config_manager = config_manager
 
-        # Create setup handler using framework (will use form from driver.json)
         setup_handler = AnthemSetupFlow.create_handler(driver)
 
-        # Initialize API with driver.json and setup handler
         driver_path = os.path.join(os.path.dirname(__file__), "..", "driver.json")
         await driver.api.init(os.path.abspath(driver_path), setup_handler)
 
-        # Register all configured devices
-        await driver.register_all_configured_devices(connect=False)
+        await driver.register_all_device_instances(connect=False)
 
-        # Set initial state
         device_count = len(list(config_manager.all()))
         if device_count > 0:
             _LOG.info("Configured with %d device(s)", device_count)
@@ -72,8 +67,6 @@ async def main():
             await driver.api.set_device_state(DeviceStates.DISCONNECTED)
 
         _LOG.info("Integration started successfully")
-
-        # Keep running indefinitely
         await asyncio.Future()
 
     except KeyboardInterrupt:

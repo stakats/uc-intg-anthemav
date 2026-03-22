@@ -10,6 +10,7 @@ from typing import Any
 
 from ucapi import StatusCodes
 from ucapi.select import Attributes, Commands, Select, States
+from ucapi_framework import SelectEntity
 
 from .config import AnthemDeviceConfig, ZoneConfig
 from . import const
@@ -48,10 +49,8 @@ LISTENING_MODES_X20 = {
     "Stereo": 15,
 }
 
-LISTENING_MODE_NAMES = {v: k for k, v in LISTENING_MODES.items()}
 
-
-class AnthemListeningModeSelect(Select):
+class AnthemListeningModeSelect(SelectEntity):
     """Select entity for choosing audio listening mode."""
 
     def __init__(
@@ -65,7 +64,7 @@ class AnthemListeningModeSelect(Select):
         self._zone_config = zone_config
 
         if zone_config.zone_number == 1:
-            entity_id = f"select.{device_config.identifier}_listening_mode"
+            entity_id = f"select.{device_config.identifier}.listening_mode"
             entity_name = f"{device_config.name} Listening Mode"
         else:
             entity_id = f"select.{device_config.identifier}.zone{zone_config.zone_number}_listening_mode"
@@ -86,32 +85,20 @@ class AnthemListeningModeSelect(Select):
             entity_id,
             entity_name,
             attributes,
-            cmd_handler=self.handle_command,
+            cmd_handler=self._handle_command,
         )
 
-        _LOG.info(
-            "[%s] Listening mode select initialized for Zone %d with %d options",
-            entity_id,
-            zone_config.zone_number,
-            len(options_list),
-        )
+        self.subscribe_to_device(device)
 
-        device.events.on("UPDATE", self._on_device_update)
-
-    async def _on_device_update(self, entity_id: str, update_data: dict[str, Any]) -> None:
-        """Handle device updates for listening mode select."""
-        expected_sensor_id = (
-            f"sensor.{self._device_config.identifier}_listening_mode"
-            if self._zone_config.zone_number == 1
-            else f"sensor.{self._device_config.identifier}.zone{self._zone_config.zone_number}_listening_mode"
-        )
-
-        if entity_id == expected_sensor_id:
-            zone_state = self._device.get_zone_state(self._zone_config.zone_number)
-            mode_name = zone_state.listening_mode
-            self.attributes[Attributes.STATE] = States.ON
-            self.attributes[Attributes.CURRENT_OPTION] = mode_name
-            _LOG.debug("[%s] Listening mode updated to %s", self.id, mode_name)
+    async def sync_state(self):
+        if not self._device.is_connected:
+            self.update({Attributes.STATE: States.UNAVAILABLE})
+            return
+        zone_state = self._device.get_zone_state(self._zone_config.zone_number)
+        self.update({
+            Attributes.STATE: States.ON,
+            Attributes.CURRENT_OPTION: zone_state.listening_mode,
+        })
 
     def _get_alm_command(self, zone: int, mode_num: int) -> str:
         if self._device.is_x20_series:
@@ -121,10 +108,9 @@ class AnthemListeningModeSelect(Select):
     def _get_mode_map(self) -> dict[str, int]:
         return LISTENING_MODES_X20 if self._device.is_x20_series else LISTENING_MODES
 
-    async def handle_command(
+    async def _handle_command(
         self, entity: Select, cmd_id: str, params: dict[str, Any] | None
     ) -> StatusCodes:
-        """Handle select commands."""
         _LOG.info("[%s] Command: %s %s", self.id, cmd_id, params or "")
 
         try:
@@ -136,7 +122,6 @@ class AnthemListeningModeSelect(Select):
 
             if cmd_id == Commands.SELECT_OPTION:
                 if not params or "option" not in params:
-                    _LOG.error("[%s] Missing option parameter", self.id)
                     return StatusCodes.BAD_REQUEST
 
                 option = params["option"]
@@ -220,5 +205,4 @@ class AnthemListeningModeSelect(Select):
 
     @property
     def zone_number(self) -> int:
-        """Get zone number."""
         return self._zone_config.zone_number

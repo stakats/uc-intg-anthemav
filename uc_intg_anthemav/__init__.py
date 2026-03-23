@@ -14,9 +14,9 @@ from pathlib import Path
 from ucapi import DeviceStates
 from ucapi_framework import get_config_path, BaseConfigManager
 
-from .driver import AnthemDriver
-from .setup_flow import AnthemSetupFlow
-from .config import AnthemDeviceConfig
+from uc_intg_anthemav.driver import AnthemDriver
+from uc_intg_anthemav.setup_flow import AnthemSetupFlow
+from uc_intg_anthemav.config import AnthemDeviceConfig
 
 try:
     _driver_path = Path(__file__).parent.parent / "driver.json"

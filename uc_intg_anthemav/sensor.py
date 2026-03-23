@@ -10,8 +10,8 @@ import logging
 from ucapi.sensor import Attributes, DeviceClasses, Options, States
 from ucapi_framework import SensorEntity
 
-from .config import AnthemDeviceConfig
-from .device import AnthemDevice
+from uc_intg_anthemav.config import AnthemDeviceConfig
+from uc_intg_anthemav.device import AnthemDevice
 
 _LOG = logging.getLogger(__name__)
 

@@ -12,8 +12,8 @@ from typing import Any
 from ucapi import IntegrationSetupError, RequestUserInput, SetupError
 from ucapi_framework import BaseSetupFlow
 
-from .config import AnthemDeviceConfig, ZoneConfig
-from .device import AnthemDevice
+from uc_intg_anthemav.config import AnthemDeviceConfig, ZoneConfig
+from uc_intg_anthemav.device import AnthemDevice
 
 _LOG = logging.getLogger(__name__)
 

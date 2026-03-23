@@ -9,12 +9,12 @@ import logging
 
 from ucapi_framework import BaseIntegrationDriver
 
-from .config import AnthemDeviceConfig
-from .device import AnthemDevice
-from .media_player import AnthemMediaPlayer
-from .remote import AnthemRemote
-from .sensor import create_sensors
-from .select import AnthemListeningModeSelect
+from uc_intg_anthemav.config import AnthemDeviceConfig
+from uc_intg_anthemav.device import AnthemDevice
+from uc_intg_anthemav.media_player import AnthemMediaPlayer
+from uc_intg_anthemav.remote import AnthemRemote
+from uc_intg_anthemav.sensor import create_sensors
+from uc_intg_anthemav.select import AnthemListeningModeSelect
 
 _LOG = logging.getLogger(__name__)
 

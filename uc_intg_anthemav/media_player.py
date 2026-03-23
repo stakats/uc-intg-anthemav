@@ -12,8 +12,8 @@ from ucapi import StatusCodes
 from ucapi.media_player import Attributes, Commands, DeviceClasses, Features, MediaPlayer, States, Options
 from ucapi_framework import MediaPlayerEntity
 
-from .config import AnthemDeviceConfig, ZoneConfig
-from .device import AnthemDevice
+from uc_intg_anthemav.config import AnthemDeviceConfig, ZoneConfig
+from uc_intg_anthemav.device import AnthemDevice
 
 _LOG = logging.getLogger(__name__)
 

@@ -12,9 +12,9 @@ from ucapi import StatusCodes
 from ucapi.remote import Attributes, Commands, Features, Options, Remote, States
 from ucapi_framework import RemoteEntity
 
-from .config import AnthemDeviceConfig, ZoneConfig
-from . import const
-from .device import AnthemDevice
+from uc_intg_anthemav.config import AnthemDeviceConfig, ZoneConfig
+from uc_intg_anthemav import const
+from uc_intg_anthemav.device import AnthemDevice
 
 _LOG = logging.getLogger(__name__)
 

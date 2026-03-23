@@ -8,7 +8,7 @@ This allows running: python -m uc_intg_anthemav
 """
 
 import asyncio
-from . import main
+from uc_intg_anthemav import main
 
 if __name__ == "__main__":
     asyncio.run(main())

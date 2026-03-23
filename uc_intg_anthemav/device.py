@@ -13,9 +13,9 @@ from collections import defaultdict
 
 from ucapi_framework import PersistentConnectionDevice
 
-from .config import AnthemDeviceConfig
-from . import const
-from .models import (
+from uc_intg_anthemav.config import AnthemDeviceConfig
+from uc_intg_anthemav import const
+from uc_intg_anthemav.models import (
     ParsedMessage,
     SystemModel,
     InputCount,
@@ -33,7 +33,7 @@ from .models import (
     ZoneBitDepth,
     ZoneState,
 )
-from .parser import parse_message
+from uc_intg_anthemav.parser import parse_message
 
 _LOG = logging.getLogger(__name__)
 

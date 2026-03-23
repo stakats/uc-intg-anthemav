@@ -10,7 +10,7 @@ Centralized parsing of protocol responses into typed message objects.
 import re
 from typing import Optional
 
-from .models import (
+from uc_intg_anthemav.models import (
     ParsedMessage,
     SystemModel,
     InputCount,
@@ -27,7 +27,7 @@ from .models import (
     ZoneSampleRate,
     ZoneBitDepth,
 )
-from . import const
+from uc_intg_anthemav import const
 
 
 def parse_message(response: str) -> Optional[ParsedMessage]:

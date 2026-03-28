@@ -95,8 +95,10 @@ class AnthemListeningModeSelect(SelectEntity):
             self.update({Attributes.STATE: States.UNAVAILABLE})
             return
         zone_state = self._device.get_zone_state(self._zone_config.zone_number)
+        options_list = list(LISTENING_MODES_X20.keys()) if self._device.is_x20_series else list(LISTENING_MODES.keys())
         self.update({
             Attributes.STATE: States.ON,
+            Attributes.OPTIONS: options_list,
             Attributes.CURRENT_OPTION: zone_state.listening_mode,
         })
 

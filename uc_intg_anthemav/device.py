@@ -38,6 +38,9 @@ from uc_intg_anthemav.parser import parse_message
 _LOG = logging.getLogger(__name__)
 
 
+_VOLUME_DISPLAY_OFFSET = 55
+
+
 class AnthemDevice(PersistentConnectionDevice):
     def __init__(self, device_config: AnthemDeviceConfig, **kwargs):
         super().__init__(device_config, **kwargs)
@@ -249,23 +252,28 @@ class AnthemDevice(PersistentConnectionDevice):
 
     @_handle_message.register
     def _(self, message: ZoneVolume) -> None:
-        if message.volume_db < -90 or message.volume_db > 0:
+        volume_db = message.volume_db
+
+        if volume_db > 0 and self._is_legacy_mrx:
+            volume_db = volume_db - _VOLUME_DISPLAY_OFFSET
+
+        if volume_db < -90 or volume_db > 10:
             _LOG.warning(
-                "[%s] Invalid volume dB value: %d (must be -90 to 0), ignoring",
+                "[%s] Invalid volume value: %d, ignoring",
                 self.log_id,
                 message.volume_db,
             )
             return
 
         zone = self._zone_states[message.zone]
-        if zone.volume_db is not None and message.volume_db == zone.volume_db:
+        if zone.volume_db is not None and volume_db == zone.volume_db:
             return
-        zone.volume_db = message.volume_db
+        zone.volume_db = volume_db
         _LOG.debug(
             "[%s] Zone %d: Volume update %ddB",
             self.log_id,
             message.zone,
-            message.volume_db,
+            volume_db,
         )
         self.push_update()
 
@@ -357,6 +365,13 @@ class AnthemDevice(PersistentConnectionDevice):
         self.push_update()
 
     @property
+    def _is_legacy_mrx(self) -> bool:
+        if not self._model:
+            return False
+        model_upper = self._model.upper()
+        return "MRX" in model_upper and "540" in model_upper
+
+    @property
     def is_x20_series(self) -> bool:
         return self._uses_isn_format()
 
@@ -390,10 +405,14 @@ class AnthemDevice(PersistentConnectionDevice):
             await self._send_command(cmd)
             await asyncio.sleep(0.05)
 
+    _LEGACY_UNSUPPORTED_SENSORS = {"audio_format", "audio_channels", "video_resolution", "sample_rate"}
+
     def get_sensor_value(self, key: str) -> str | None:
         """Get sensor value by key from Zone 1 state."""
         if key == "model":
             return self._model
+        if self._is_legacy_mrx and key in self._LEGACY_UNSUPPORTED_SENSORS:
+            return "Not Supported"
         zone = self._zone_states[1]
         mapping = {
             "volume": str(zone.volume_db) if zone.volume_db is not None else None,
@@ -533,18 +552,23 @@ class AnthemDevice(PersistentConnectionDevice):
             const.CMD_VOLUME_QUERY,
             const.CMD_MUTE_QUERY,
             const.CMD_INPUT_QUERY,
-            const.CMD_AUDIO_FORMAT_QUERY,
-            const.CMD_AUDIO_CHANNELS_QUERY,
-            const.CMD_VIDEO_RESOLUTION_QUERY,
             const.CMD_LISTENING_MODE_QUERY,
-            const.CMD_AUDIO_SAMPLE_RATE_QUERY,
         ]
+        if not self._is_legacy_mrx:
+            queries.extend([
+                const.CMD_AUDIO_FORMAT_QUERY,
+                const.CMD_AUDIO_CHANNELS_QUERY,
+                const.CMD_VIDEO_RESOLUTION_QUERY,
+                const.CMD_AUDIO_SAMPLE_RATE_QUERY,
+            ])
         for q in queries:
             await self._send_command(self._get_zone_command(zone, q))
             await asyncio.sleep(0.05)
         return True
 
     async def query_audio_info(self, zone: int = 1) -> bool:
+        if self._is_legacy_mrx:
+            return True
         queries = [
             const.CMD_AUDIO_FORMAT_QUERY,
             const.CMD_AUDIO_CHANNELS_QUERY,
@@ -559,6 +583,8 @@ class AnthemDevice(PersistentConnectionDevice):
         return True
 
     async def query_video_info(self, zone: int = 1) -> bool:
+        if self._is_legacy_mrx:
+            return True
         queries = [
             const.CMD_VIDEO_RESOLUTION_QUERY,
             const.CMD_VIDEO_HORIZ_RES_QUERY,

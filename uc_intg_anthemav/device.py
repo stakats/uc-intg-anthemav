@@ -254,7 +254,7 @@ class AnthemDevice(PersistentConnectionDevice):
     def _(self, message: ZoneVolume) -> None:
         volume_db = message.volume_db
 
-        if volume_db > 0 and self._is_legacy_mrx:
+        if volume_db > 0 and self._has_volume_display_offset:
             volume_db = volume_db - _VOLUME_DISPLAY_OFFSET
 
         if volume_db < -90 or volume_db > 10:
@@ -365,7 +365,7 @@ class AnthemDevice(PersistentConnectionDevice):
         self.push_update()
 
     @property
-    def _is_legacy_mrx(self) -> bool:
+    def _has_volume_display_offset(self) -> bool:
         if not self._model:
             return False
         model_upper = self._model.upper()
@@ -405,14 +405,10 @@ class AnthemDevice(PersistentConnectionDevice):
             await self._send_command(cmd)
             await asyncio.sleep(0.05)
 
-    _LEGACY_UNSUPPORTED_SENSORS = {"audio_format", "audio_channels", "video_resolution", "sample_rate"}
-
     def get_sensor_value(self, key: str) -> str | None:
         """Get sensor value by key from Zone 1 state."""
         if key == "model":
             return self._model
-        if self._is_legacy_mrx and key in self._LEGACY_UNSUPPORTED_SENSORS:
-            return "Not Supported"
         zone = self._zone_states[1]
         mapping = {
             "volume": str(zone.volume_db) if zone.volume_db is not None else None,
@@ -553,22 +549,17 @@ class AnthemDevice(PersistentConnectionDevice):
             const.CMD_MUTE_QUERY,
             const.CMD_INPUT_QUERY,
             const.CMD_LISTENING_MODE_QUERY,
+            const.CMD_AUDIO_FORMAT_QUERY,
+            const.CMD_AUDIO_CHANNELS_QUERY,
+            const.CMD_VIDEO_RESOLUTION_QUERY,
+            const.CMD_AUDIO_SAMPLE_RATE_QUERY,
         ]
-        if not self._is_legacy_mrx:
-            queries.extend([
-                const.CMD_AUDIO_FORMAT_QUERY,
-                const.CMD_AUDIO_CHANNELS_QUERY,
-                const.CMD_VIDEO_RESOLUTION_QUERY,
-                const.CMD_AUDIO_SAMPLE_RATE_QUERY,
-            ])
         for q in queries:
             await self._send_command(self._get_zone_command(zone, q))
             await asyncio.sleep(0.05)
         return True
 
     async def query_audio_info(self, zone: int = 1) -> bool:
-        if self._is_legacy_mrx:
-            return True
         queries = [
             const.CMD_AUDIO_FORMAT_QUERY,
             const.CMD_AUDIO_CHANNELS_QUERY,
@@ -583,8 +574,6 @@ class AnthemDevice(PersistentConnectionDevice):
         return True
 
     async def query_video_info(self, zone: int = 1) -> bool:
-        if self._is_legacy_mrx:
-            return True
         queries = [
             const.CMD_VIDEO_RESOLUTION_QUERY,
             const.CMD_VIDEO_HORIZ_RES_QUERY,

@@ -542,6 +542,13 @@ class AnthemDevice(PersistentConnectionDevice):
         mode = max(0, min(2, mode))
         return await self._send_command(f"{const.CMD_OSD_INFO}{mode}")
 
+    async def query_volume(self, zone: int = 1) -> bool:
+        await asyncio.sleep(0.1)
+        await self._send_command(self._get_zone_command(zone, const.CMD_VOLUME_QUERY))
+        await asyncio.sleep(0.05)
+        await self._send_command(self._get_zone_command(zone, const.CMD_MUTE_QUERY))
+        return True
+
     async def query_status(self, zone: int = 1) -> bool:
         queries = [
             const.CMD_POWER_QUERY,

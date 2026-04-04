@@ -402,6 +402,10 @@ class AnthemRemote(RemoteEntity):
             elif command == "INFO":
                 if is_x20:
                     return StatusCodes.OK
+                # TODO: This permanently enables the receiver's OSD (GCOSID1).
+                # It should either toggle (query GCOSID? then flip) or be
+                # removed, since users don't expect a button press to change
+                # a persistent receiver setting.
                 success = await self._device.set_osd_info(1)
             elif command == "ARC_ON":
                 input_num = self._device.get_zone_state(zone).input_number

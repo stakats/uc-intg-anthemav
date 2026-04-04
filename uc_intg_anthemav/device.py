@@ -22,6 +22,7 @@ from uc_intg_anthemav.models import (
     InputName,
     ZonePower,
     ZoneVolume,
+    ZoneVolumePercent,
     ZoneMute,
     ZoneInput,
     ZoneAudioFormat,
@@ -38,9 +39,6 @@ from uc_intg_anthemav.parser import parse_message
 _LOG = logging.getLogger(__name__)
 
 
-_VOLUME_DISPLAY_OFFSET = 55
-
-
 class AnthemDevice(PersistentConnectionDevice):
     def __init__(self, device_config: AnthemDeviceConfig, **kwargs):
         super().__init__(device_config, **kwargs)
@@ -52,6 +50,7 @@ class AnthemDevice(PersistentConnectionDevice):
         self._input_names: dict[int, str] = {}
         self._input_count: int = 0
         self._model: str | None = None
+        self._sensor_poll_tasks: dict[int, asyncio.Task] = {}
 
     @property
     def identifier(self) -> str:
@@ -83,8 +82,13 @@ class AnthemDevice(PersistentConnectionDevice):
         )
 
         await self._send_command(const.CMD_ECHO_ON)
-        await asyncio.sleep(0.1)
-        await self._send_command(const.CMD_STANDBY_IP_CONTROL_ON)
+        await asyncio.sleep(0.05)
+        if self._device_config.is_x40_series:
+            await self._send_command(const.CMD_TX_STATUS_IP)
+            await asyncio.sleep(0.05)
+            await self._send_command(const.CMD_CONNECTED_STANDBY_ON)
+        else:
+            await self._send_command(const.CMD_STANDBY_IP_CONTROL_ON)
         await asyncio.sleep(0.1)
         await self._send_command(const.CMD_MODEL_QUERY)
         await asyncio.sleep(0.1)
@@ -95,6 +99,10 @@ class AnthemDevice(PersistentConnectionDevice):
             if zone.enabled:
                 await self._send_command(
                     self._get_zone_command(zone.zone_number, const.CMD_POWER_QUERY)
+                )
+                await asyncio.sleep(0.05)
+                await self._send_command(
+                    self._get_zone_command(zone.zone_number, const.CMD_LISTENING_MODE_QUERY)
                 )
                 await asyncio.sleep(0.05)
 
@@ -198,6 +206,14 @@ class AnthemDevice(PersistentConnectionDevice):
             _LOG.warning("[%s] Device error: %s", self.log_id, response)
             return
 
+        if response.startswith("!R"):
+            _LOG.warning("[%s] Out-of-range parameter: %s", self.log_id, response)
+            return
+
+        if response.startswith("!Z"):
+            _LOG.warning("[%s] Zone is off: %s", self.log_id, response)
+            return
+
         message = parse_message(response)
         if message:
             self._handle_message(message)
@@ -211,7 +227,7 @@ class AnthemDevice(PersistentConnectionDevice):
     def _(self, message: SystemModel) -> None:
         self._model = message.model
         self._device_config.discovered_model = message.model
-        _LOG.info("[%s] Model: %s", self.log_id, message.model)
+        _LOG.info("[%s] Model: %s (series: %s)", self.log_id, message.model, self._device_config.series)
         self.push_update()
 
     @_handle_message.register
@@ -245,18 +261,56 @@ class AnthemDevice(PersistentConnectionDevice):
 
         if message.is_on:
             asyncio.create_task(self._query_zone_on_power_on(message.zone))
+        else:
+            # Cancel sensor polling when zone powers off
+            task = self._sensor_poll_tasks.pop(message.zone, None)
+            if task:
+                task.cancel()
 
     async def _query_zone_on_power_on(self, zone: int) -> None:
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(2.0)
         _LOG.debug("[%s] Querying zone %d state after power on", self.log_id, zone)
         await self.query_status(zone)
+        # Start sensor polling - receiver doesn't push AIF/AIC/VIR updates
+        self._start_sensor_poll(zone)
+
+    async def _query_after_input_change(self, zone: int) -> None:
+        await asyncio.sleep(2.0)
+        _LOG.debug("[%s] Querying zone %d audio/video after input change", self.log_id, zone)
+        await self.query_audio_info(zone)
+        await self.query_video_info(zone)
+
+    def _start_sensor_poll(self, zone: int) -> None:
+        """Start periodic polling for audio/video sensor data."""
+        old_task = self._sensor_poll_tasks.pop(zone, None)
+        if old_task:
+            old_task.cancel()
+        self._sensor_poll_tasks[zone] = asyncio.create_task(
+            self._poll_sensor_data(zone)
+        )
+
+    async def _poll_sensor_data(self, zone: int) -> None:
+        """Poll audio/video sensors periodically while zone is on."""
+        poll_queries = [
+            const.CMD_AUDIO_FORMAT_QUERY,
+            const.CMD_AUDIO_CHANNELS_QUERY,
+            const.CMD_VIDEO_RESOLUTION_QUERY,
+        ]
+        while True:
+            state = self._zone_states[zone]
+            if not state.power:
+                return
+            await asyncio.sleep(15)
+            state = self._zone_states[zone]
+            if not state.power:
+                return
+            for q in poll_queries:
+                await self._send_command(self._get_zone_command(zone, q))
+                await asyncio.sleep(0.05)
 
     @_handle_message.register
     def _(self, message: ZoneVolume) -> None:
         volume_db = message.volume_db
-
-        if volume_db > 0 and self._has_volume_display_offset:
-            volume_db = volume_db - _VOLUME_DISPLAY_OFFSET
 
         if volume_db < -90 or volume_db > 10:
             _LOG.warning(
@@ -279,6 +333,19 @@ class AnthemDevice(PersistentConnectionDevice):
         self.push_update()
 
     @_handle_message.register
+    def _(self, message: ZoneVolumePercent) -> None:
+        zone = self._zone_states[message.zone]
+        pct = max(0, min(100, message.volume_pct))
+        if zone.volume_pct is not None and pct == zone.volume_pct:
+            return
+        zone.volume_pct = pct
+        _LOG.debug(
+            "[%s] Zone %d: Volume percent update %d%%",
+            self.log_id, message.zone, pct,
+        )
+        self.push_update()
+
+    @_handle_message.register
     def _(self, message: ZoneMute) -> None:
         zone = self._zone_states[message.zone]
         if zone.muted is not None and message.is_muted == zone.muted:
@@ -296,11 +363,14 @@ class AnthemDevice(PersistentConnectionDevice):
             message.input_number, f"Input {message.input_number}"
         )
         self.push_update()
+        if zone.power:
+            asyncio.create_task(self._query_after_input_change(message.zone))
 
     @_handle_message.register
     def _(self, message: ZoneAudioFormat) -> None:
         zone = self._zone_states[message.zone]
-        decoded = const.AUDIO_FORMAT_NAMES.get(message.format, message.format)
+        fmt_map = const.AUDIO_FORMAT_NAMES if self.is_x20_series else const.AUDIO_FORMAT_NAMES_X40
+        decoded = fmt_map.get(message.format, message.format)
         if decoded == zone.audio_format:
             return
         zone.audio_format = decoded
@@ -309,7 +379,8 @@ class AnthemDevice(PersistentConnectionDevice):
     @_handle_message.register
     def _(self, message: ZoneAudioChannels) -> None:
         zone = self._zone_states[message.zone]
-        decoded = const.AUDIO_CHANNELS_NAMES.get(message.channels, message.channels)
+        ch_map = const.AUDIO_CHANNELS_NAMES if self.is_x20_series else const.AUDIO_CHANNELS_NAMES_X40
+        decoded = ch_map.get(message.channels, message.channels)
         if decoded == zone.audio_channels:
             return
         zone.audio_channels = decoded
@@ -318,7 +389,8 @@ class AnthemDevice(PersistentConnectionDevice):
     @_handle_message.register
     def _(self, message: ZoneVideoResolution) -> None:
         zone = self._zone_states[message.zone]
-        decoded = const.VIDEO_RESOLUTION_NAMES.get(message.resolution, message.resolution)
+        res_map = const.VIDEO_RESOLUTION_NAMES if self.is_x20_series else const.VIDEO_RESOLUTION_NAMES_X40
+        decoded = res_map.get(message.resolution, message.resolution)
         if decoded == zone.video_resolution:
             return
         zone.video_resolution = decoded
@@ -328,11 +400,12 @@ class AnthemDevice(PersistentConnectionDevice):
     def _(self, message: ZoneListeningMode) -> None:
         zone = self._zone_states[message.zone]
         if self.is_x20_series:
-            mode_name = const.LISTENING_MODES_X20.get(
-                message.mode_number, f"Mode {message.mode_number}"
-            )
+            mode_map = const.LISTENING_MODES_X20
         else:
-            mode_name = message.mode_name
+            mode_map = const.LISTENING_MODES_X40
+        mode_name = mode_map.get(
+            message.mode_number, f"Mode {message.mode_number}"
+        )
         if mode_name == zone.listening_mode:
             return
         zone.listening_mode = mode_name
@@ -366,32 +439,16 @@ class AnthemDevice(PersistentConnectionDevice):
         self.push_update()
 
     @property
-    def _has_volume_display_offset(self) -> bool:
-        if not self._model:
-            return False
-        model_upper = self._model.upper()
-        return "MRX" in model_upper and "540" in model_upper
+    def is_x20_series(self) -> bool:
+        return self._device_config.is_x20_series
 
     @property
-    def is_x20_series(self) -> bool:
-        return self._uses_isn_format()
-
-    def _uses_isn_format(self) -> bool:
-        if not self._model:
-            return False
-
-        model_upper = self._model.upper()
-        if "AVM 60" in model_upper or "AVM60" in model_upper:
-            return True
-        if "MRX" in model_upper:
-            for suffix in ["520", "720", "1120"]:
-                if suffix in model_upper:
-                    return True
-        return False
+    def is_x40_series(self) -> bool:
+        return self._device_config.is_x40_series
 
     async def _discover_input_names(self) -> None:
         """Query custom/virtual input names from receiver."""
-        use_isn = self._uses_isn_format()
+        use_isn = self.is_x20_series
         _LOG.debug(
             "[%s] Input discovery using %s format",
             self.log_id,
@@ -432,7 +489,7 @@ class AnthemDevice(PersistentConnectionDevice):
         )
 
     async def set_volume(self, volume_db: int, zone: int = 1) -> bool:
-        volume_db = max(-90, min(0, volume_db))
+        volume_db = max(-90, min(10, volume_db))
         return await self._send_command(
             self._get_zone_command(zone, const.CMD_VOLUME, volume_db)
         )
@@ -452,6 +509,25 @@ class AnthemDevice(PersistentConnectionDevice):
         zone_state.volume_db = new_vol
         self.push_update()
         return await self.set_volume(new_vol, zone)
+
+    async def set_volume_percent(self, percent: int, zone: int = 1) -> bool:
+        """Set volume as percentage (x40 series only)."""
+        percent = max(0, min(100, percent))
+        return await self._send_command(
+            self._get_zone_command(zone, const.CMD_VOLUME_PERCENT, percent)
+        )
+
+    async def volume_up_percent(self, zone: int = 1) -> bool:
+        """Volume up by 1% (x40 series only)."""
+        return await self._send_command(
+            self._get_zone_command(zone, const.CMD_VOLUME_PERCENT_UP)
+        )
+
+    async def volume_down_percent(self, zone: int = 1) -> bool:
+        """Volume down by 1% (x40 series only)."""
+        return await self._send_command(
+            self._get_zone_command(zone, const.CMD_VOLUME_PERCENT_DOWN)
+        )
 
     async def set_mute(self, muted: bool, zone: int = 1) -> bool:
         return await self._send_command(
@@ -551,6 +627,9 @@ class AnthemDevice(PersistentConnectionDevice):
         await asyncio.sleep(0.1)
         await self._send_command(self._get_zone_command(zone, const.CMD_VOLUME_QUERY))
         await asyncio.sleep(0.05)
+        if not self.is_x20_series:
+            await self._send_command(self._get_zone_command(zone, const.CMD_VOLUME_PERCENT_QUERY))
+            await asyncio.sleep(0.05)
         await self._send_command(self._get_zone_command(zone, const.CMD_MUTE_QUERY))
         return True
 
@@ -566,6 +645,8 @@ class AnthemDevice(PersistentConnectionDevice):
             const.CMD_VIDEO_RESOLUTION_QUERY,
             const.CMD_AUDIO_SAMPLE_RATE_QUERY,
         ]
+        if not self.is_x20_series:
+            queries.insert(2, const.CMD_VOLUME_PERCENT_QUERY)
         for q in queries:
             await self._send_command(self._get_zone_command(zone, q))
             await asyncio.sleep(0.05)

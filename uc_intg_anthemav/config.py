@@ -36,6 +36,7 @@ class AnthemDeviceConfig:
 
     @property
     def is_x20_series(self) -> bool:
+
         model_upper = self.discovered_model.upper()
         if "AVM 60" in model_upper or "AVM60" in model_upper:
             return True
@@ -44,3 +45,24 @@ class AnthemDeviceConfig:
                 if suffix in model_upper:
                     return True
         return False
+
+    @property
+    def is_x40_series(self) -> bool:
+
+        model_upper = self.discovered_model.upper()
+        if any(s in model_upper for s in ["AVM 70", "AVM70", "AVM 90", "AVM90"]):
+            return True
+        if "MRX" in model_upper:
+            for suffix in ["540", "740", "1140"]:
+                if suffix in model_upper:
+                    return True
+        return False
+
+    @property
+    def series(self) -> str:
+        """Return the detected series identifier, or 'unknown'."""
+        if self.is_x20_series:
+            return "x20"
+        if self.is_x40_series:
+            return "x40"
+        return "unknown"

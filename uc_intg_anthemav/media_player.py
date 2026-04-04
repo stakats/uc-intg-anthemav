@@ -80,8 +80,12 @@ class AnthemMediaPlayer(MediaPlayerEntity):
             return
 
         zone_state = self._device.get_zone_state(self._zone_config.zone_number)
-        vol_db = zone_state.volume_db if zone_state.volume_db is not None else -90
-        volume_pct = max(0, min(100, int(((vol_db + 90) / 90) * 100)))
+
+        if zone_state.volume_pct is not None:
+            volume_pct = zone_state.volume_pct
+        else:
+            vol_db = zone_state.volume_db if zone_state.volume_db is not None else -90
+            volume_pct = max(0, min(100, int(((vol_db + 90) / 90) * 100)))
 
         attrs = {
             Attributes.STATE: States.ON if zone_state.power else States.OFF,
@@ -117,17 +121,26 @@ class AnthemMediaPlayer(MediaPlayerEntity):
             elif cmd_id == Commands.VOLUME:
                 if params and "volume" in params:
                     volume_pct = float(params["volume"])
-                    volume_db = int((volume_pct * 90 / 100) - 90)
-                    success = await self._device.set_volume(volume_db, zone)
+                    if self._device.is_x20_series:
+                        volume_db = int((volume_pct * 90 / 100) - 90)
+                        success = await self._device.set_volume(volume_db, zone)
+                    else:
+                        success = await self._device.set_volume_percent(int(volume_pct), zone)
                     return StatusCodes.OK if success else StatusCodes.SERVER_ERROR
                 return StatusCodes.BAD_REQUEST
 
             elif cmd_id == Commands.VOLUME_UP:
-                success = await self._device.volume_up(zone)
+                if self._device.is_x40_series:
+                    success = await self._device.volume_up_percent(zone)
+                else:
+                    success = await self._device.volume_up(zone)
                 return StatusCodes.OK if success else StatusCodes.SERVER_ERROR
 
             elif cmd_id == Commands.VOLUME_DOWN:
-                success = await self._device.volume_down(zone)
+                if self._device.is_x40_series:
+                    success = await self._device.volume_down_percent(zone)
+                else:
+                    success = await self._device.volume_down(zone)
                 return StatusCodes.OK if success else StatusCodes.SERVER_ERROR
 
             elif cmd_id == Commands.MUTE_TOGGLE:

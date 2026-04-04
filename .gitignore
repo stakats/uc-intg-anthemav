@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.venv/
+build/
+dist/
+*.spec
+*.tar.gz
+*.egg-info/
+*.xls
+
+# Testing files (keep local only, never push to repository)
+tests/
+simulator/
+
+# Claude knowledge base (local only, never commit)
+.claude/
+knowledge-base/
+*.knowledge.md

@@ -39,9 +39,6 @@ from uc_intg_anthemav.parser import parse_message
 _LOG = logging.getLogger(__name__)
 
 
-_VOLUME_DISPLAY_OFFSET = 55
-
-
 class AnthemDevice(PersistentConnectionDevice):
     def __init__(self, device_config: AnthemDeviceConfig, **kwargs):
         super().__init__(device_config, **kwargs)
@@ -336,9 +333,6 @@ class AnthemDevice(PersistentConnectionDevice):
     def _(self, message: ZoneVolume) -> None:
         volume_db = message.volume_db
 
-        if volume_db > 0 and self._has_volume_display_offset:
-            volume_db = volume_db - _VOLUME_DISPLAY_OFFSET
-
         if volume_db < -90 or volume_db > 10:
             _LOG.warning(
                 "[%s] Invalid volume value: %d, ignoring",
@@ -464,13 +458,6 @@ class AnthemDevice(PersistentConnectionDevice):
             return
         zone.sample_rate = new_rate
         self.push_update()
-
-    @property
-    def _has_volume_display_offset(self) -> bool:
-        if not self._model:
-            return False
-        model_upper = self._model.upper()
-        return "MRX" in model_upper and "540" in model_upper
 
     @property
     def is_x20_series(self) -> bool:

@@ -81,9 +81,11 @@ def parse_message(response: str) -> Optional[ParsedMessage]:
                 return ZoneVolumePercent(zone=zone_num, volume_pct=int(pvol_match.group(1)))
 
         if const.RESP_VOLUME in payload:
-            vol_match = re.search(rf"{const.RESP_VOLUME}(-?\d+)", payload)
+            # Receiver pushes dB at 0.5 dB resolution on x40 (per Anthem v5
+            # spec). Capture the optional fractional part instead of dropping it.
+            vol_match = re.search(rf"{const.RESP_VOLUME}(-?\d+(?:\.\d+)?)", payload)
             if vol_match:
-                return ZoneVolume(zone=zone_num, volume_db=int(vol_match.group(1)))
+                return ZoneVolume(zone=zone_num, volume_db=float(vol_match.group(1)))
 
         if const.RESP_MUTE in payload:
             return ZoneMute(zone=zone_num, is_muted=const.VAL_ON in payload)

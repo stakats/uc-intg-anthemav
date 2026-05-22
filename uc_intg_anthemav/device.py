@@ -539,7 +539,9 @@ class AnthemDevice(PersistentConnectionDevice):
             return self._model
         zone = self._zone_states[1]
         mapping = {
-            "volume": str(zone.volume_db) if zone.volume_db is not None else None,
+            # Always show one decimal so the half-dB precision is visible
+            # to the user even when the current value is integer-valued.
+            "volume": f"{zone.volume_db:.1f}" if zone.volume_db is not None else None,
             "audio_format": zone.audio_format if zone.audio_format != "Unknown" else None,
             "audio_channels": zone.audio_channels if zone.audio_channels != "Unknown" else None,
             "video_resolution": zone.video_resolution if zone.video_resolution != "Unknown" else None,
@@ -559,9 +561,9 @@ class AnthemDevice(PersistentConnectionDevice):
         )
 
     async def set_volume(
-        self, volume_db: int, zone: int = 1, skip_if_redundant: bool = True
+        self, volume_db: float, zone: int = 1, skip_if_redundant: bool = True
     ) -> bool:
-        volume_db = max(-90, min(10, volume_db))
+        volume_db = max(-90.0, min(10.0, volume_db))
         # Skip no-op writes: the receiver returns !E when asked to set to
         # its current value, which would otherwise trigger pointless retries.
         # Callers that have already mutated zone_state optimistically (e.g.
@@ -824,5 +826,11 @@ class AnthemDevice(PersistentConnectionDevice):
         return self._zone_states[zone]
 
     def _get_zone_command(self, zone: int, command: str, value: Any = "") -> str:
+        # Format floats canonically so integer-valued floats serialise the
+        # same as ints. This keeps the retry-registry key (Z1VOL-30) matching
+        # whether the value comes from a dB-preset send (int) or a state echo
+        # from the receiver (parsed as float).
+        if isinstance(value, float):
+            value = f"{value:g}"  # -30.0 -> "-30", -30.5 -> "-30.5"
         return f"{const.CMD_ZONE_PREFIX}{zone}{command}{value}"
 

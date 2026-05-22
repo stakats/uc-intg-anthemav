@@ -132,14 +132,17 @@ class AnthemMediaPlayer(MediaPlayerEntity):
 
             elif cmd_id == Commands.VOLUME_UP:
                 if self._device.is_x40_series:
-                    success = await self._device.volume_up_percent(zone)
+                    # Fire-and-forget VUP — receiver steps by its native VOL
+                    # increment (0.5 dB on MRX 540), matching the IR remote.
+                    success = await self._device.volume_up_step(zone)
                 else:
                     success = await self._device.volume_up(zone)
                 return StatusCodes.OK if success else StatusCodes.SERVER_ERROR
 
             elif cmd_id == Commands.VOLUME_DOWN:
                 if self._device.is_x40_series:
-                    success = await self._device.volume_down_percent(zone)
+                    # See VOLUME_UP for rationale.
+                    success = await self._device.volume_down_step(zone)
                 else:
                     success = await self._device.volume_down(zone)
                 return StatusCodes.OK if success else StatusCodes.SERVER_ERROR

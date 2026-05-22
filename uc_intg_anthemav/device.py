@@ -626,6 +626,26 @@ class AnthemDevice(PersistentConnectionDevice):
             self._get_zone_command(zone, const.CMD_VOLUME_PERCENT_DOWN)
         )
 
+    async def volume_up_step(self, zone: int = 1) -> bool:
+        """Volume up by the receiver's native VOL step (fire-and-forget).
+
+        Sends bare ``Z{zone}VUP;`` and lets the receiver pick the increment
+        — empirically 0.5 dB on x40, matching the Anthem IR remote.
+        """
+        return await self._send_command(
+            self._get_zone_command(zone, const.CMD_VOLUME_UP)
+        )
+
+    async def volume_down_step(self, zone: int = 1) -> bool:
+        """Volume down by the receiver's native VOL step (fire-and-forget).
+
+        Sends bare ``Z{zone}VDN;`` and lets the receiver pick the increment
+        — empirically 0.5 dB on x40, matching the Anthem IR remote.
+        """
+        return await self._send_command(
+            self._get_zone_command(zone, const.CMD_VOLUME_DOWN)
+        )
+
     async def set_mute(self, muted: bool, zone: int = 1) -> bool:
         return await self._send_command(
             self._get_zone_command(
